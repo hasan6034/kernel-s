@@ -29,6 +29,9 @@
 #include <linux/hqsysfs.h>
 /*BSP.Touch - 2020.11.13 - add for hw_info end*/
 #if defined(CONFIG_FB)
+#ifdef CONFIG_DRM_MSM
+#include <linux/msm_drm_notify.h>
+#endif
 #include <linux/notifier.h>
 #include <linux/fb.h>
 #elif defined(CONFIG_HAS_EARLYSUSPEND)
@@ -87,7 +90,11 @@ char *MP_UPDATE_FIRMWARE_NAME;
 #endif
 
 #if defined(CONFIG_FB)
+#ifdef _MSM_DRM_NOTIFY_H_
+static int nvt_drm_notifier_callback(struct notifier_block *self, unsigned long event, void *data);
+#else
 static int nvt_fb_notifier_callback(struct notifier_block *self, unsigned long event, void *data);
+#endif
 #elif defined(CONFIG_HAS_EARLYSUSPEND)
 static void nvt_ts_early_suspend(struct early_suspend *h);
 static void nvt_ts_late_resume(struct early_suspend *h);
@@ -814,7 +821,13 @@ void get_tp_info(void)
 {
 	nvt_get_fw_info();
 
-	if (is_ft_lcm == 4) {
+	if (is_ft_lcm == 0) {
+		sprintf(tp_version_info, "[Vendor]Tianma,[TP-IC]:NT36672,[FW]0x%x,PID=%04X\n", tp_fw_version, ts->nvt_pid);
+	} else if (is_ft_lcm == 1) {
+		sprintf(tp_version_info, "[Vendor]Dijing,[TP-IC]:NT36672,[FW]0x%x,PID=%04X\n", tp_fw_version, ts->nvt_pid);
+	} else if (is_ft_lcm == 3) {
+		sprintf(tp_version_info, "[Vendor]Dijing,[TP-IC]:NT36672D,[FW]0x%x,PID=%04X\n", tp_fw_version, ts->nvt_pid);
+	} else if (is_ft_lcm == 4) {
 		sprintf(tp_version_info, "[Vendor]Tianma,[TP-IC]:NT36672C,[FW]0x%x,PID=%04X\n", tp_fw_version, ts->nvt_pid);
 	} else if (is_ft_lcm == 5) {
 		sprintf(tp_version_info, "[Vendor]Truly,[TP-IC]:NT36672C,[FW]0x%x,PID=%04X\n", tp_fw_version, ts->nvt_pid);
@@ -2025,7 +2038,22 @@ int nvt_remove_sysfs(struct spi_device *client)
 int tp_compare_ic(void)
 {
 	NVT_LOG("tp_compare_ic in!!");
-	if (is_ft_lcm == 4) {
+	if (is_ft_lcm == 0) {
+		BOOT_UPDATE_FIRMWARE_NAME = "nvt_tm_fw.bin";
+		MP_UPDATE_FIRMWARE_NAME = "nvt_tm_mp.bin";
+		NVT_LOG("match nt36672A_fhdp_dsi_vdo_tianma_j19_lcm_drv");
+		return 0;
+	} else if (is_ft_lcm == 1) {
+		BOOT_UPDATE_FIRMWARE_NAME = "nvt_dj_fw.bin";
+		MP_UPDATE_FIRMWARE_NAME = "nvt_dj_mp.bin";
+		NVT_LOG("match nt36672A_fhdp_dsi_vdo_dijing_j19_lcm_drv");
+		return 0;
+	} else if (is_ft_lcm == 3) {
+		BOOT_UPDATE_FIRMWARE_NAME = "nvt_dj_72d_fw.bin";
+		MP_UPDATE_FIRMWARE_NAME = "nvt_dj_72d_mp.bin";
+		NVT_LOG("match nt36672D_fhdp_dsi_vdo_dijing_j19_lcm_drv");
+		return 0;
+	} else if (is_ft_lcm == 4) {
 		BOOT_UPDATE_FIRMWARE_NAME = "nt36672c_tm_01_ts_fw.bin";
 		MP_UPDATE_FIRMWARE_NAME = "nt36672c_tm_01_ts_mp.bin";
 		NVT_LOG("match dsi_panel_k19a_36_02_0a_dsc_vdo_lcm_drv");
@@ -2362,12 +2390,21 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 	}
 #endif
 #if defined(CONFIG_FB)
+#ifdef _MSM_DRM_NOTIFY_H_
+	ts->drm_notif.notifier_call = nvt_drm_notifier_callback;
+	ret = msm_drm_register_client(&ts->drm_notif);
+	if (ret) {
+		NVT_ERR("register drm_notifier failed. ret=%d\n", ret);
+		goto err_register_drm_notif_failed;
+	}
+#else
 	ts->fb_notif.notifier_call = nvt_fb_notifier_callback;
 	ret = fb_register_client(&ts->fb_notif);
 	if (ret) {
 		NVT_ERR("register fb_notifier failed. ret=%d\n", ret);
 		goto err_register_fb_notif_failed;
 	}
+#endif
 #elif defined(CONFIG_HAS_EARLYSUSPEND)
 	ts->early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 1;
 	ts->early_suspend.suspend = nvt_ts_early_suspend;
@@ -2396,9 +2433,15 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 	return 0;
 
 #if defined(CONFIG_FB)
+#ifdef _MSM_DRM_NOTIFY_H_
+	if (msm_drm_unregister_client(&ts->drm_notif))
+		NVT_ERR("Error occurred while unregistering drm_notifier.\n");
+err_register_drm_notif_failed:
+#else
 	if (fb_unregister_client(&ts->fb_notif))
 		NVT_ERR("Error occurred while unregistering fb_notifier.\n");
 err_register_fb_notif_failed:
+#endif
 #elif defined(CONFIG_HAS_EARLYSUSPEND)
 	unregister_early_suspend(&ts->early_suspend);
 err_register_early_suspend_failed:
@@ -2513,8 +2556,13 @@ static int32_t nvt_ts_remove(struct spi_device *client)
 	nvt_remove_sysfs(client);
 	/*BSP.TP add nvt_irq - 2020.11.11 - End*/
 #if defined(CONFIG_FB)
+#ifdef _MSM_DRM_NOTIFY_H_
+	if (msm_drm_unregister_client(&ts->drm_notif))
+		NVT_ERR("Error occurred while unregistering drm_notifier.\n");
+#else
 	if (fb_unregister_client(&ts->fb_notif))
 		NVT_ERR("Error occurred while unregistering fb_notifier.\n");
+#endif
 #elif defined(CONFIG_HAS_EARLYSUSPEND)
 	unregister_early_suspend(&ts->early_suspend);
 #endif
@@ -2591,8 +2639,13 @@ static void nvt_ts_shutdown(struct spi_device *client)
 	nvt_irq_enable(false);
 
 #if defined(CONFIG_FB)
+#ifdef _MSM_DRM_NOTIFY_H_
+	if (msm_drm_unregister_client(&ts->drm_notif))
+		NVT_ERR("Error occurred while unregistering drm_notifier.\n");
+#else
 	if (fb_unregister_client(&ts->fb_notif))
 		NVT_ERR("Error occurred while unregistering fb_notifier.\n");
+#endif
 #elif defined(CONFIG_HAS_EARLYSUSPEND)
 	unregister_early_suspend(&ts->early_suspend);
 #endif
@@ -2953,6 +3006,35 @@ int32_t nvt_ts_tp_resume(void)
 EXPORT_SYMBOL(nvt_ts_tp_resume);
 
 #if defined(CONFIG_FB)
+#ifdef _MSM_DRM_NOTIFY_H_
+static int nvt_drm_notifier_callback(struct notifier_block *self, unsigned long event, void *data)
+{
+	struct msm_drm_notifier *evdata = data;
+	int *blank;
+	struct nvt_ts_data *ts =
+		container_of(self, struct nvt_ts_data, drm_notif);
+
+	if (!evdata || (evdata->id != 0))
+		return 0;
+
+	if (evdata->data && ts) {
+		blank = evdata->data;
+		if (event == MSM_DRM_EARLY_EVENT_BLANK) {
+			if (*blank == MSM_DRM_BLANK_POWERDOWN) {
+				NVT_LOG("event=%lu, *blank=%d\n", event, *blank);
+				nvt_ts_suspend(&ts->client->dev);
+			}
+		} else if (event == MSM_DRM_EVENT_BLANK) {
+			if (*blank == MSM_DRM_BLANK_UNBLANK) {
+				NVT_LOG("event=%lu, *blank=%d\n", event, *blank);
+				nvt_ts_resume(&ts->client->dev);
+			}
+		}
+	}
+
+	return 0;
+}
+#else
 static int nvt_fb_notifier_callback(struct notifier_block *self, unsigned long event, void *data)
 {
 	struct fb_event *evdata = data;
@@ -2998,6 +3080,7 @@ static int nvt_fb_notifier_callback(struct notifier_block *self, unsigned long e
 
 	return 0;
 }
+#endif
 #elif defined(CONFIG_HAS_EARLYSUSPEND)
 /*******************************************************
 Description:
@@ -3053,7 +3136,19 @@ static struct spi_driver nvt_spi_driver = {
 /* Huaqin modify for HQ-123470 by shujiawang at 2021/03/29 start */
 int __init is_lcm_detect(char *str)
 {
-	if (!(strcmp(str, "dsi_panel_k19a_36_02_0a_dsc_vdo_lcm_drv"))) {
+	if (!(strcmp(str, "nt36672A_fhdp_dsi_vdo_tianma_j19_lcm_drv"))) {
+		is_ft_lcm = 0;
+		NVT_LOG("Func:%s is_ft 0:%d", __func__, is_ft_lcm);
+	}else if (!(strcmp(str, "nt36672A_fhdp_dsi_vdo_dijing_j19_lcm_drv"))) {
+		is_ft_lcm = 1;
+		NVT_LOG("Func:%s is_ft 1:%d", __func__, is_ft_lcm);
+	}else if (!(strcmp(str, "ft8719_fhdp_dsi_vdo_huaxing_j19_lcm_drv"))) {
+		is_ft_lcm = 2;
+		NVT_LOG("Func:%s is_ft 2:%d", __func__, is_ft_lcm);
+	}else if (!(strcmp(str, "nt36672D_fhdp_dsi_vdo_dijing_j19_lcm_drv"))) {
+		is_ft_lcm = 3;
+		NVT_LOG("Func:%s is_ft 3:%d", __func__, is_ft_lcm);
+	}else if (!(strcmp(str, "dsi_panel_k19a_36_02_0a_dsc_vdo_lcm_drv"))) {
 		is_ft_lcm = 4;
 		NVT_LOG("Func:%s is_ft 4:%d", __func__, is_ft_lcm);
 	}else if (!(strcmp(str, "dsi_panel_k19a_43_02_0b_dsc_vdo_lcm_drv"))) {

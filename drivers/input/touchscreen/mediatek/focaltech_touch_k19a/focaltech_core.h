@@ -100,7 +100,7 @@
 
 #define FTS_MAX_COMPATIBLE_TYPE			 	4
 #define FTS_MAX_COMMMAND_LENGTH			 	16
-#define	FTS_PALM_EN	                            0
+#define	FTS_PALM_EN	                            1
 
 /*****************************************************************************
 *  Alternative mode (When something goes wrong, the modules may be able to solve the problem.)
